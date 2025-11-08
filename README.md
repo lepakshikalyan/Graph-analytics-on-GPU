@@ -8,6 +8,8 @@ This repository contains CUDA implementations of fundamental graph algorithms op
 | `bfs.cu` | Breadth-First Search (BFS) using CUDA. |
 | `pagerank.cu` | PageRank algorithm using iterative GPU computation. |
 | `SCC.cu` | Strongly Connected Components detection using parallel graph traversal. |
+| `dynamic_bfs.cu` | Dynamic BFS supporting edge/node insertions and deletions on GPU. |
+| `dynamic_page_rank.cu` | Dynamic PageRank computation updating scores incrementally after graph changes. |
 
 ---
 
@@ -37,7 +39,17 @@ nvcc -O2 -arch=sm_60 pagerank.cu -o pagerank
 ```bash
 nvcc -O2 -arch=sm_60 SCC.cu -o scc
 ```
-##  Running the Programs
+###Compile Dynamic BFS
+
+```bash
+nvcc -O2 -arch=sm_60 dynamic_bfs.cu -o dynamic_bfs
+```
+
+###Compile Dynamic PageRank
+```bash
+nvcc -O2 -arch=sm_60 dynamic_page_rank.cu -o dynamic_page_rank
+```
+###  Running the Programs
 
 After compiling, run the executables as follows:
 
@@ -45,6 +57,8 @@ After compiling, run the executables as follows:
 ./bfs
 ./pagerank
 ./scc
+./dynamic_bfs
+./dynamic_page_rank
 ```
 
 
