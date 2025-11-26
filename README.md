@@ -49,6 +49,16 @@ nvcc  dynamic_bfs.cu -o dynamic_bfs
 ```bash
 nvcc  dynamic_page_rank.cu -o dynamic_page_rank
 ```
+
+###Compile Dynamic SSSp
+```bash
+nvcc  dynamic_sssp.cu -o dynamic_sssp
+```
+
+###Compile Dynamic WCC
+```bash
+nvcc  wcc.cu -o wcc
+```
 ###  Running the Programs
 
 After compiling, run the executables as follows:
@@ -59,6 +69,8 @@ After compiling, run the executables as follows:
 ./scc
 ./dynamic_bfs
 ./dynamic_page_rank
+./dynamic_sssp
+./wcc
 ```
 
 
