@@ -10,6 +10,8 @@ This repository contains CUDA implementations of fundamental graph algorithms op
 | `SCC.cu` | Strongly Connected Components detection using parallel graph traversal. |
 | `dynamic_bfs.cu` | Dynamic BFS supporting edge/node insertions and deletions on GPU. |
 | `dynamic_page_rank.cu` | Dynamic PageRank computation updating scores incrementally after graph changes. |
+| `dynamic_sssp.cu` | Single Source Shortest Path caluclated dynamically after adding and modifying edges  |
+| `wcc.cu` | Dynamic updation of components with incrementation of edges|
 
 ---
 
@@ -39,23 +41,23 @@ nvcc  pagerank.cu -o pagerank
 ```bash
 nvcc  SCC.cu -o scc
 ```
-###Compile Dynamic BFS
+### Compile Dynamic BFS
 
 ```bash
 nvcc  dynamic_bfs.cu -o dynamic_bfs
 ```
 
-###Compile Dynamic PageRank
+### Compile Dynamic PageRank
 ```bash
 nvcc  dynamic_page_rank.cu -o dynamic_page_rank
 ```
 
-###Compile Dynamic SSSp
+### Compile Dynamic SSSp
 ```bash
 nvcc  dynamic_sssp.cu -o dynamic_sssp
 ```
 
-###Compile Dynamic WCC
+### Compile Dynamic WCC
 ```bash
 nvcc  wcc.cu -o wcc
 ```
