@@ -32,22 +32,22 @@ nvcc -O2 -arch=sm_60 bfs.cu -o bfs
 
 ### Compile PageRank
 ```bash
-nvcc -O2 -arch=sm_60 pagerank.cu -o pagerank
+nvcc  pagerank.cu -o pagerank
 ```
 
 ### Compile SCC
 ```bash
-nvcc -O2 -arch=sm_60 SCC.cu -o scc
+nvcc  SCC.cu -o scc
 ```
 ###Compile Dynamic BFS
 
 ```bash
-nvcc -O2 -arch=sm_60 dynamic_bfs.cu -o dynamic_bfs
+nvcc  dynamic_bfs.cu -o dynamic_bfs
 ```
 
 ###Compile Dynamic PageRank
 ```bash
-nvcc -O2 -arch=sm_60 dynamic_page_rank.cu -o dynamic_page_rank
+nvcc  dynamic_page_rank.cu -o dynamic_page_rank
 ```
 ###  Running the Programs
 
