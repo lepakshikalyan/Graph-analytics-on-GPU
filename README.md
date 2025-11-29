@@ -74,7 +74,28 @@ After compiling, run the executables as follows:
 ./dynamic_sssp
 ./wcc
 ```
+### Datasets used
+This project uses real-world graphs from multiple domains, all taken from the SNAP dataset collection (Stanford Network Analysis Project):
 
+1. Social Networks:
+ego-Epinions1,
+soc-Slashdot0922
+
+3. Communication Networks:
+email-EuAll
+
+4. Web Graphs:
+web-NotreDame
+
+4.Road Networks:
+roadNet-CA
+
+
+
+All datasets can be downloaded from:
+ https://snap.stanford.edu/data/index.html
+
+Each dataset is provided as an edge-list text file, which can be directly used as input to the CUDA programs in this repository.
 
 Developed by B.L.Kalyan and K.Balakrishna  
 For project work on **Dynamic Graph Analytics on GPU**
