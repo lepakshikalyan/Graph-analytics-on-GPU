@@ -10,10 +10,14 @@ void bfs_step(const int*row_ptr,const int*col_idx,int*dist,
     int u=front[tid];
     int du=dist[u];
     for(int ei=row_ptr[u];ei<row_ptr[u+1];ei++){
-        int v=col_idx[ei];
-        if(atomicCAS(&dist[v],-1,du+1)==-1){
-            int idx=atomicAdd(nsize,1);
-            next[idx]=v;
+       int v=col_idx[ei];
+
+        int newDist = du + 1;
+        int oldDist = atomicMin(&dist[v], newDist);
+
+        if(oldDist > newDist){
+            int idx = atomicAdd(nsize, 1);
+            next[idx] = v;
         }
     }
 }
