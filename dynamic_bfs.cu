@@ -2,8 +2,9 @@
 #include<cuda_runtime.h>
 using namespace std;
 
-__global__ void bfs_step(const int*row_ptr,const int*col_idx,int*dist,
-                         const int*front,int fsize,int*next,int*nsize){
+__global__
+void bfs_step(const int*row_ptr,const int*col_idx,int*dist,
+              const int*front,int fsize,int*next,int*nsize){
     int tid=blockIdx.x*blockDim.x+threadIdx.x;
     if(tid>=fsize)return;
     int u=front[tid];
@@ -33,26 +34,31 @@ void buildCSR(int n,const vector<pair<int,int>>&edges,
 
 void loadGraph(const string&file,vector<pair<int,int>>&edges,int&n){
     ifstream fin(file);
+    if(!fin.is_open()){
+        cerr<<"Cannot open graph file\n";
+        exit(1);
+    }
     n=0;
     string line;
     while(getline(fin,line)){
         if(line.empty()||line[0]=='#')continue;
-        stringstream ss(line);
         int u,v;
+        stringstream ss(line);
         ss>>u>>v;
         edges.emplace_back(u,v);
-        if(u>n)n=u;
-        if(v>n)n=v;
+        n=max(n,max(u,v));
     }
     n++;
 }
 
-struct Update{
-    int u,v;
-};
+struct Update{int u,v;};
 
 void loadUpdates(const string&file,vector<Update>&updates){
     ifstream fin(file);
+    if(!fin.is_open()){
+        cerr<<"Cannot open updates file\n";
+        exit(1);
+    }
     int t,u,v;
     string op;
     while(fin>>t>>op>>u>>v){
@@ -61,7 +67,7 @@ void loadUpdates(const string&file,vector<Update>&updates){
 }
 
 int main(){
-    string graphFile="graph.txt";
+    string graphFile="data1.txt";
     string updateFile="updates.txt";
 
     vector<pair<int,int>>edges;
@@ -93,9 +99,7 @@ int main(){
     int frontier_size=1;
     cudaMemcpy(d_front,frontier.data(),sizeof(int),cudaMemcpyHostToDevice);
 
-    int MAX_ITERS=n;
-
-    for(int iter=0;iter<MAX_ITERS&&frontier_size>0;iter++){
+    for(int iter=0;iter<n&&frontier_size>0;iter++){
         cudaMemset(d_next_size,0,sizeof(int));
         int blocks=(frontier_size+255)/256;
         bfs_step<<<blocks,256>>>(d_row,d_col,d_dist,d_front,
@@ -107,69 +111,76 @@ int main(){
 
     cudaMemcpy(dist.data(),d_dist,n*sizeof(int),cudaMemcpyDeviceToHost);
 
-    unordered_map<long long,int>emap;
-    emap.reserve(edges.size()*2);
-    for(auto&e:edges){
-        long long k=((long long)e.first<<32)|e.second;
-        emap[k]=1;
-    }
-    for(auto&u:updates){
-        long long k=((long long)u.u<<32)|u.v;
-        emap[k]=1;
-    }
-
-    vector<pair<int,int>>edges_after;
-    edges_after.reserve(emap.size());
-    for(auto&p:emap){
-        int u=p.first>>32;
-        int v=p.first&0xffffffff;
-        edges_after.emplace_back(u,v);
-    }
-
-    cudaEvent_t s1,e1,s2,e2;
+    cudaEvent_t s1,e1;
     cudaEventCreate(&s1);
     cudaEventCreate(&e1);
-    cudaEventCreate(&s2);
-    cudaEventCreate(&e2);
-
     cudaEventRecord(s1);
 
     vector<char>inF(n,0);
     vector<int>dyn_front;
+    bool changed=true;
 
-    for(auto&u:updates){
-        int a=u.u,b=u.v;
-        if(dist[a]!=-1&&(dist[b]==-1||dist[a]+1<dist[b])){
-            dist[b]=dist[a]+1;
-            if(!inF[b]){
-                inF[b]=1;
-                dyn_front.push_back(b);
+    while(changed){
+        changed=false;
+        for(auto&up:updates){
+            int a=up.u,b=up.v;
+            if(dist[a]!=-1&&(dist[b]==-1||dist[a]+1<dist[b])){
+                dist[b]=dist[a]+1;
+                if(!inF[b]){
+                    inF[b]=1;
+                    dyn_front.push_back(b);
+                }
+                changed=true;
             }
         }
-    }
-
-    frontier_size=dyn_front.size();
-    cudaMemcpy(d_dist,dist.data(),n*sizeof(int),cudaMemcpyHostToDevice);
-
-    if(frontier_size>0){
+        int frontier_size=dyn_front.size();
+        if(frontier_size==0)break;
+        cudaMemcpy(d_dist,dist.data(),n*sizeof(int),cudaMemcpyHostToDevice);
         cudaMemcpy(d_front,dyn_front.data(),frontier_size*sizeof(int),cudaMemcpyHostToDevice);
-    }
 
-    for(int iter=0;iter<MAX_ITERS&&frontier_size>0;iter++){
-        cudaMemset(d_next_size,0,sizeof(int));
-        int blocks=(frontier_size+255)/256;
-        bfs_step<<<blocks,256>>>(d_row,d_col,d_dist,d_front,
-                                 frontier_size,d_next,d_next_size);
-        cudaDeviceSynchronize();
-        cudaMemcpy(&frontier_size,d_next_size,sizeof(int),cudaMemcpyDeviceToHost);
-        swap(d_front,d_next);
+        dyn_front.clear();
+        fill(inF.begin(),inF.end(),0);
+
+        for(int iter=0;iter<n&&frontier_size>0;iter++){
+            cudaMemset(d_next_size,0,sizeof(int));
+            int blocks=(frontier_size+255)/256;
+            bfs_step<<<blocks,256>>>(d_row,d_col,d_dist,d_front,
+                                     frontier_size,d_next,d_next_size);
+            cudaDeviceSynchronize();
+            cudaMemcpy(&frontier_size,d_next_size,sizeof(int),cudaMemcpyDeviceToHost);
+            if(frontier_size==0)break;
+            swap(d_front,d_next);
+        }
+        cudaMemcpy(dist.data(),d_dist,n*sizeof(int),cudaMemcpyDeviceToHost);
     }
 
     cudaEventRecord(e1);
     cudaEventSynchronize(e1);
-
     float T1;
     cudaEventElapsedTime(&T1,s1,e1);
+
+    cudaEvent_t s2,e2;
+    cudaEventCreate(&s2);
+    cudaEventCreate(&e2);
+
+    unordered_map<long long,int>mp;
+    mp.reserve(edges.size()+updates.size());
+    for(auto&e:edges){
+        long long k=((long long)e.first<<32)|e.second;
+        mp[k]=1;
+    }
+    for(auto&u:updates){
+        long long k=((long long)u.u<<32)|u.v;
+        mp[k]=1;
+    }
+
+    vector<pair<int,int>>edges_after;
+    edges_after.reserve(mp.size());
+    for(auto&p:mp){
+        int u=p.first>>32;
+        int v=p.first&0xffffffff;
+        edges_after.emplace_back(u,v);
+    }
 
     cudaEventRecord(s2);
 
@@ -177,15 +188,15 @@ int main(){
     cudaMemcpy(d_row,row_ptr.data(),(n+1)*sizeof(int),cudaMemcpyHostToDevice);
     cudaMemcpy(d_col,col_idx.data(),col_idx.size()*sizeof(int),cudaMemcpyHostToDevice);
 
-    for(int i=0;i<n;i++)dist[i]=-1;
-    dist[0]=0;
-    cudaMemcpy(d_dist,dist.data(),n*sizeof(int),cudaMemcpyHostToDevice);
+    vector<int>dist2(n,-1);
+    dist2[0]=0;
+    cudaMemcpy(d_dist,dist2.data(),n*sizeof(int),cudaMemcpyHostToDevice);
 
     frontier={0};
     frontier_size=1;
     cudaMemcpy(d_front,frontier.data(),sizeof(int),cudaMemcpyHostToDevice);
 
-    for(int iter=0;iter<MAX_ITERS&&frontier_size>0;iter++){
+    for(int iter=0;iter<n&&frontier_size>0;iter++){
         cudaMemset(d_next_size,0,sizeof(int));
         int blocks=(frontier_size+255)/256;
         bfs_step<<<blocks,256>>>(d_row,d_col,d_dist,d_front,
@@ -197,7 +208,6 @@ int main(){
 
     cudaEventRecord(e2);
     cudaEventSynchronize(e2);
-
     float T2;
     cudaEventElapsedTime(&T2,s2,e2);
 
