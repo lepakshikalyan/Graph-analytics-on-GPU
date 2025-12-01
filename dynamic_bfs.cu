@@ -10,14 +10,14 @@ void bfs_step(const int*row_ptr,const int*col_idx,int*dist,
     int u=front[tid];
     int du=dist[u];
     for(int ei=row_ptr[u];ei<row_ptr[u+1];ei++){
-       int v=col_idx[ei];
+        int v=col_idx[ei];
 
-        int newDist = du + 1;
-        int oldDist = atomicMin(&dist[v], newDist);
+        int newDist=du+1;
+        int oldDist=atomicMin(&dist[v],newDist);
 
-        if(oldDist > newDist){
-            int idx = atomicAdd(nsize, 1);
-            next[idx] = v;
+        if(oldDist>newDist){
+            int idx=atomicAdd(nsize,1);
+            next[idx]=v;
         }
     }
 }
@@ -95,7 +95,7 @@ int main(){
     cudaMemcpy(d_row,row_ptr.data(),(n+1)*sizeof(int),cudaMemcpyHostToDevice);
     cudaMemcpy(d_col,col_idx.data(),col_idx.size()*sizeof(int),cudaMemcpyHostToDevice);
 
-    vector<int>dist(n,-1);
+    vector<int>dist(n,INT_MAX);
     dist[0]=0;
     cudaMemcpy(d_dist,dist.data(),n*sizeof(int),cudaMemcpyHostToDevice);
 
@@ -128,7 +128,7 @@ int main(){
         changed=false;
         for(auto&up:updates){
             int a=up.u,b=up.v;
-            if(dist[a]!=-1&&(dist[b]==-1||dist[a]+1<dist[b])){
+            if(dist[a]!=INT_MAX && dist[a]+1<dist[b]){
                 dist[b]=dist[a]+1;
                 if(!inF[b]){
                     inF[b]=1;
@@ -139,8 +139,10 @@ int main(){
         }
         int frontier_size=dyn_front.size();
         if(frontier_size==0)break;
+
         cudaMemcpy(d_dist,dist.data(),n*sizeof(int),cudaMemcpyHostToDevice);
-        cudaMemcpy(d_front,dyn_front.data(),frontier_size*sizeof(int),cudaMemcpyHostToDevice);
+        cudaMemcpy(d_front,dyn_front.data(),
+                   frontier_size*sizeof(int),cudaMemcpyHostToDevice);
 
         dyn_front.clear();
         fill(inF.begin(),inF.end(),0);
@@ -155,7 +157,8 @@ int main(){
             if(frontier_size==0)break;
             swap(d_front,d_next);
         }
-        cudaMemcpy(dist.data(),d_dist,n*sizeof(int),cudaMemcpyDeviceToHost);
+
+        cudaMemcpy(dist.data(),d_dist,n*sizeof(int),cudaMemcpyHostToDevice);
     }
 
     cudaEventRecord(e1);
@@ -192,7 +195,7 @@ int main(){
     cudaMemcpy(d_row,row_ptr.data(),(n+1)*sizeof(int),cudaMemcpyHostToDevice);
     cudaMemcpy(d_col,col_idx.data(),col_idx.size()*sizeof(int),cudaMemcpyHostToDevice);
 
-    vector<int>dist2(n,-1);
+    vector<int>dist2(n,INT_MAX);
     dist2[0]=0;
     cudaMemcpy(d_dist,dist2.data(),n*sizeof(int),cudaMemcpyHostToDevice);
 
