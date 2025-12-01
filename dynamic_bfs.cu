@@ -2,41 +2,37 @@
 #include<cuda_runtime.h>
 using namespace std;
 
-__global__ void bfs_csr(int*row_ptr,int*col_idx,int*dist,int*front,int fsize,int*next,int*nsize,int level){
+__global__ void bfs_step(const int*row_ptr,const int*col_idx,int*dist,
+                         const int*front,int fsize,int*next,int*nsize){
     int tid=blockIdx.x*blockDim.x+threadIdx.x;
     if(tid>=fsize)return;
     int u=front[tid];
-    for(int i=row_ptr[u];i<row_ptr[u+1];i++){
-        int v=col_idx[i];
-        if(atomicCAS(&dist[v],-1,level+1)==-1){
+    int du=dist[u];
+    for(int ei=row_ptr[u];ei<row_ptr[u+1];ei++){
+        int v=col_idx[ei];
+        if(atomicCAS(&dist[v],-1,du+1)==-1){
             int idx=atomicAdd(nsize,1);
             next[idx]=v;
         }
     }
 }
 
-__global__ void bfs_update_edges(int*row_ptr,int*col_idx,int*dist,int*front,int fsize,int*next,int*nsize){
-    int tid=blockIdx.x*blockDim.x+threadIdx.x;
-    if(tid>=fsize)return;
-    int u=front[tid];
-    int du=dist[u];
-    if(du<0)return;
-    for(int i=row_ptr[u];i<row_ptr[u+1];i++){
-        int v=col_idx[i];
-        int dv=dist[v];
-        if(dv==-1||du+1<dv){
-            int old=atomicMin(&dist[v],du+1);
-            if(old==-1||old>du+1){
-                int idx=atomicAdd(nsize,1);
-                next[idx]=v;
-            }
-        }
+void buildCSR(int n,const vector<pair<int,int>>&edges,
+              vector<int>&row_ptr,vector<int>&col_idx){
+    row_ptr.assign(n+1,0);
+    vector<int>deg(n,0);
+    for(auto&e:edges)deg[e.first]++;
+    for(int i=1;i<=n;i++)row_ptr[i]=row_ptr[i-1]+deg[i-1];
+    col_idx.assign(edges.size(),0);
+    vector<int>pos(n,0);
+    for(auto&e:edges){
+        int u=e.first,v=e.second;
+        col_idx[row_ptr[u]+pos[u]++]=v;
     }
 }
 
 void loadGraph(const string&file,vector<pair<int,int>>&edges,int&n){
     ifstream fin(file);
-    if(!fin.is_open()){cerr<<"error\n";exit(1);}
     n=0;
     string line;
     while(getline(fin,line)){
@@ -45,55 +41,34 @@ void loadGraph(const string&file,vector<pair<int,int>>&edges,int&n){
         int u,v;
         ss>>u>>v;
         edges.emplace_back(u,v);
-        n=max(n,max(u,v));
+        if(u>n)n=u;
+        if(v>n)n=v;
     }
     n++;
-    fin.close();
 }
 
-void generateUpdates(const string&file,int n,int k){
-    ofstream fout(file);
-    random_device rd;mt19937 gen(rd());
-    uniform_int_distribution<>dis(0,n-1);
-    for(int i=0;i<k;i++){
-        int u=dis(gen),v=dis(gen);
-        fout<<i<<" ADD "<<u<<" "<<v<<"\n";
-    }
-    fout.close();
-}
+struct Update{
+    int u,v;
+};
 
-void loadUpdates(const string&file,vector<pair<int,int>>&updates){
+void loadUpdates(const string&file,vector<Update>&updates){
     ifstream fin(file);
-    int t,u,v;string op;
-    while(fin>>t>>op>>u>>v)updates.emplace_back(u,v);
-    fin.close();
-}
-
-void buildCSR(int n,const vector<pair<int,int>>&edges,vector<int>&row_ptr,vector<int>&col_idx){
-    row_ptr.assign(n+1,0);
-    vector<int>deg(n,0);
-    for(auto&p:edges)deg[p.first]++;
-    for(int i=1;i<=n;i++)row_ptr[i]=row_ptr[i-1]+deg[i-1];
-    col_idx.resize(edges.size());
-    vector<int>pos(n,0);
-    for(auto&p:edges){
-        int u=p.first,v=p.second;
-        int idx=row_ptr[u]+pos[u]++;
-        col_idx[idx]=v;
+    int t,u,v;
+    string op;
+    while(fin>>t>>op>>u>>v){
+        updates.push_back({u,v});
     }
 }
 
 int main(){
-    string graphFile="data.txt";
-    string updateFile="dynamic_dataset.txt";
+    string graphFile="graph.txt";
+    string updateFile="updates.txt";
 
     vector<pair<int,int>>edges;
-    vector<pair<int,int>>updates;
     int n;
     loadGraph(graphFile,edges,n);
 
-    int n_updates=3500;
-    generateUpdates(updateFile,n,n_updates);
+    vector<Update>updates;
     loadUpdates(updateFile,updates);
 
     vector<int>row_ptr,col_idx;
@@ -114,76 +89,121 @@ int main(){
     dist[0]=0;
     cudaMemcpy(d_dist,dist.data(),n*sizeof(int),cudaMemcpyHostToDevice);
 
-    int h_front[1]={0};
-    cudaMemcpy(d_front,h_front,sizeof(int),cudaMemcpyHostToDevice);
-
+    vector<int>frontier={0};
     int frontier_size=1;
-    int level=0;
+    cudaMemcpy(d_front,frontier.data(),sizeof(int),cudaMemcpyHostToDevice);
 
-    cudaEvent_t start,end;
-    cudaEventCreate(&start);
-    cudaEventCreate(&end);
+    int MAX_ITERS=n;
 
-    cudaEventRecord(start);
-    while(frontier_size>0){
+    for(int iter=0;iter<MAX_ITERS&&frontier_size>0;iter++){
         cudaMemset(d_next_size,0,sizeof(int));
         int blocks=(frontier_size+255)/256;
-        bfs_csr<<<blocks,256>>>(d_row,d_col,d_dist,d_front,frontier_size,d_next,d_next_size,level);
+        bfs_step<<<blocks,256>>>(d_row,d_col,d_dist,d_front,
+                                 frontier_size,d_next,d_next_size);
         cudaDeviceSynchronize();
         cudaMemcpy(&frontier_size,d_next_size,sizeof(int),cudaMemcpyDeviceToHost);
         swap(d_front,d_next);
-        level++;
     }
-    cudaEventRecord(end);
-    cudaEventSynchronize(end);
-    float staticTime;
-    cudaEventElapsedTime(&staticTime,start,end);
-    cout<<"Static CSR BFS time:"<<staticTime<<" ms\n";
 
     cudaMemcpy(dist.data(),d_dist,n*sizeof(int),cudaMemcpyDeviceToHost);
 
-    vector<pair<int,int>>edges_after=edges;
-    for(auto&p:updates)edges_after.emplace_back(p);
+    unordered_map<long long,int>emap;
+    emap.reserve(edges.size()*2);
+    for(auto&e:edges){
+        long long k=((long long)e.first<<32)|e.second;
+        emap[k]=1;
+    }
+    for(auto&u:updates){
+        long long k=((long long)u.u<<32)|u.v;
+        emap[k]=1;
+    }
+
+    vector<pair<int,int>>edges_after;
+    edges_after.reserve(emap.size());
+    for(auto&p:emap){
+        int u=p.first>>32;
+        int v=p.first&0xffffffff;
+        edges_after.emplace_back(u,v);
+    }
+
+    cudaEvent_t s1,e1,s2,e2;
+    cudaEventCreate(&s1);
+    cudaEventCreate(&e1);
+    cudaEventCreate(&s2);
+    cudaEventCreate(&e2);
+
+    cudaEventRecord(s1);
+
+    vector<char>inF(n,0);
+    vector<int>dyn_front;
+
+    for(auto&u:updates){
+        int a=u.u,b=u.v;
+        if(dist[a]!=-1&&(dist[b]==-1||dist[a]+1<dist[b])){
+            dist[b]=dist[a]+1;
+            if(!inF[b]){
+                inF[b]=1;
+                dyn_front.push_back(b);
+            }
+        }
+    }
+
+    frontier_size=dyn_front.size();
+    cudaMemcpy(d_dist,dist.data(),n*sizeof(int),cudaMemcpyHostToDevice);
+
+    if(frontier_size>0){
+        cudaMemcpy(d_front,dyn_front.data(),frontier_size*sizeof(int),cudaMemcpyHostToDevice);
+    }
+
+    for(int iter=0;iter<MAX_ITERS&&frontier_size>0;iter++){
+        cudaMemset(d_next_size,0,sizeof(int));
+        int blocks=(frontier_size+255)/256;
+        bfs_step<<<blocks,256>>>(d_row,d_col,d_dist,d_front,
+                                 frontier_size,d_next,d_next_size);
+        cudaDeviceSynchronize();
+        cudaMemcpy(&frontier_size,d_next_size,sizeof(int),cudaMemcpyDeviceToHost);
+        swap(d_front,d_next);
+    }
+
+    cudaEventRecord(e1);
+    cudaEventSynchronize(e1);
+
+    float T1;
+    cudaEventElapsedTime(&T1,s1,e1);
+
+    cudaEventRecord(s2);
 
     buildCSR(n,edges_after,row_ptr,col_idx);
     cudaMemcpy(d_row,row_ptr.data(),(n+1)*sizeof(int),cudaMemcpyHostToDevice);
     cudaMemcpy(d_col,col_idx.data(),col_idx.size()*sizeof(int),cudaMemcpyHostToDevice);
 
-    vector<int>dynamic_front;
-    for(auto&p:updates){
-        int u=p.first,v=p.second;
-        int du=dist[u],dv=dist[v];
-        if(du!=-1&&(dv==-1||du+1<dv)){
-            dist[v]=du+1;
-            dynamic_front.push_back(v);
-        }
+    for(int i=0;i<n;i++)dist[i]=-1;
+    dist[0]=0;
+    cudaMemcpy(d_dist,dist.data(),n*sizeof(int),cudaMemcpyHostToDevice);
+
+    frontier={0};
+    frontier_size=1;
+    cudaMemcpy(d_front,frontier.data(),sizeof(int),cudaMemcpyHostToDevice);
+
+    for(int iter=0;iter<MAX_ITERS&&frontier_size>0;iter++){
+        cudaMemset(d_next_size,0,sizeof(int));
+        int blocks=(frontier_size+255)/256;
+        bfs_step<<<blocks,256>>>(d_row,d_col,d_dist,d_front,
+                                 frontier_size,d_next,d_next_size);
+        cudaDeviceSynchronize();
+        cudaMemcpy(&frontier_size,d_next_size,sizeof(int),cudaMemcpyDeviceToHost);
+        swap(d_front,d_next);
     }
 
-    int dyn_frontier_size=dynamic_front.size();
-    if(dyn_frontier_size==0){
-        cout<<"No distance improvements\n";
-        cout<<"Speedup:inf\n";
-    }else{
-        cudaMemcpy(d_dist,dist.data(),n*sizeof(int),cudaMemcpyHostToDevice);
-        cudaMemcpy(d_front,dynamic_front.data(),dyn_frontier_size*sizeof(int),cudaMemcpyHostToDevice);
+    cudaEventRecord(e2);
+    cudaEventSynchronize(e2);
 
-        cudaEventRecord(start);
-        while(dyn_frontier_size>0){
-            cudaMemset(d_next_size,0,sizeof(int));
-            int blocks=(dyn_frontier_size+255)/256;
-            bfs_update_edges<<<blocks,256>>>(d_row,d_col,d_dist,d_front,dyn_frontier_size,d_next,d_next_size);
-            cudaDeviceSynchronize();
-            cudaMemcpy(&dyn_frontier_size,d_next_size,sizeof(int),cudaMemcpyDeviceToHost);
-            swap(d_front,d_next);
-        }
-        cudaEventRecord(end);
-        cudaEventSynchronize(end);
+    float T2;
+    cudaEventElapsedTime(&T2,s2,e2);
 
-        float dynamicTime;
-        cudaEventElapsedTime(&dynamicTime,start,end);
-        cout<<"Dynamic BFS:"<<dynamicTime<<" ms\n";
-        cout<<"Speedup:"<<staticTime/dynamicTime<<"x\n";
-    }
+    cout<<"Dynamic BFS Time="<<T1<<" ms\n";
+    cout<<"Rebuild+Full BFS Time="<<T2<<" ms\n";
+    cout<<"Speedup="<<T2/T1<<"x\n";
 
     cudaFree(d_row);
     cudaFree(d_col);
@@ -191,6 +211,6 @@ int main(){
     cudaFree(d_front);
     cudaFree(d_next);
     cudaFree(d_next_size);
-    cudaDeviceReset();
+
     return 0;
 }
