@@ -44,7 +44,7 @@ nvcc  SCC.cu -o scc
 ### Compile Dynamic BFS
 
 ```bash
-nvcc  dynamic_bfs.cu -o dynamic_bfs
+nvcc  dynamic_bfs.cu -o dynamicbfs
 ```
 
 ### Compile Dynamic PageRank
